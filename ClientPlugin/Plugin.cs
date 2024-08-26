@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Reflection;
 using HarmonyLib;
+using Sandbox.Game.Entities;
 using Sandbox.Graphics.GUI;
+using VRage.Game;
 using VRage.Plugins;
 
 namespace ClientPlugin
@@ -9,7 +11,7 @@ namespace ClientPlugin
     // ReSharper disable once UnusedType.Global
     public class Plugin : IPlugin, IDisposable
     {
-        public const string Name = "PluginTemplate";
+        public const string Name = "SoundPlugin";
         public static Plugin Instance { get; private set; }
 
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
