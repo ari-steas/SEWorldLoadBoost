@@ -27,13 +27,20 @@ using VRage.Plugins;
 using VRage.Utils;
 
 [HarmonyPatch(typeof(MyScriptManager), "LoadData")]
-class MySession_IsUserScripter_Patch
+public class MyScriptManager_LoadDataPatch
 {
+    public static bool IsLoading { get; private set; } = false;
+    public static List<MyCommand> CommandsToAdd;
+
     [HarmonyPrefix]
     public static bool Prefix(MyScriptManager __instance)
     {
         MySandboxGame.Log.WriteLine("PATCHED MyScriptManager.LoadData() - START");
 		MySandboxGame.Log.IncreaseIndent();
+
+        CommandsToAdd = new List<MyCommand>();
+        IsLoading = true;
+
 		MyScriptManager.Static = __instance;
 		__instance.Scripts.Clear();
 		__instance.EntityScripts.Clear();
@@ -47,13 +54,10 @@ class MySession_IsUserScripter_Patch
 		if (MySession.Static.Mods != null)
 		{
 			MyGuiScreenLoading firstScreenOfType = MyScreenManager.GetFirstScreenOfType<MyGuiScreenLoading>();
-			if (firstScreenOfType != null)
-			{
-				firstScreenOfType.SetLocalTotal((float)MySession.Static.Mods.Count);
-			}
-			bool isServer = Sync.IsServer;
+            firstScreenOfType?.SetLocalTotal((float)MySession.Static.Mods.Count);
+            bool isServer = Sync.IsServer;
 
-            Parallel.ForEach(MySession.Static.Mods, modItem => LoadScript_Multithread(modItem, firstScreenOfType, isServer, __instance), blocking: false);
+            Parallel.ForEach(MySession.Static.Mods, modItem => LoadScript_Multithread(modItem, firstScreenOfType, isServer, __instance), WorkPriority.High, blocking: false);
         }
 		foreach (Assembly assembly in __instance.Scripts.Values)
 		{
@@ -64,10 +68,18 @@ class MySession_IsUserScripter_Patch
 				MyComponentTypeFactory.Static.RegisterFromAssembly(assembly);
 				MyObjectBuilderSerializerKeen.RegisterFromAssembly(assembly);
 			}
-			MySandboxGame.Log.WriteLine(string.Format("Script loaded: {0}", assembly.FullName));
+			MySandboxGame.Log.WriteLine($"Script loaded: {assembly.FullName}");
 		}
 		MyTextSurfaceScriptFactory.LoadScripts();
 		MyUseObjectFactory.RegisterAssemblyTypes(__instance.Scripts.Values.ToArray<Assembly>());
+
+        IsLoading = false;
+        foreach (var command in CommandsToAdd)
+        {
+            MyConsole.AddCommand(command);
+        }
+        CommandsToAdd = null;
+
 		MySandboxGame.Log.DecreaseIndent();
 		MySandboxGame.Log.WriteLine("MyScriptManager.LoadData() - END");
 
@@ -91,10 +103,8 @@ class MySession_IsUserScripter_Patch
         try
         {
             __instance.Call("LoadScripts", modItem.GetPath(), myModContext);
-            if (firstScreenOfType != null)
-            {
-                firstScreenOfType.AddLocalProgress(1f);
-            }
+            firstScreenOfType?.AddLocalProgress(1f);
+            //MySandboxGame.Log.WriteLine($"Parallel loaded: {modItem.FriendlyName}");
         }
         catch (MyLoadingRuntimeCompilationNotSupportedException)
         {
@@ -106,9 +116,23 @@ class MySession_IsUserScripter_Patch
         }
         catch (Exception ex)
         {
-            MyLog.Default.WriteLine(string.Format("Fatal error compiling {0}:{1} - {2}. This item is likely not a mod and should be removed from the mod list.", myModContext.ModServiceName, myModContext.ModId, myModContext.ModName));
+            MyLog.Default.WriteLine(
+                $"Fatal error compiling {myModContext.ModServiceName}:{myModContext.ModId} - {myModContext.ModName}. This item is likely not a mod and should be removed from the mod list.");
             MyLog.Default.WriteLine(ex);
             throw;
         }
+    }
+}
+
+[HarmonyPatch(typeof(MyConsole), nameof(MyConsole.AddCommand))]
+class MyConsole_AddCommandPatch
+{
+    [HarmonyPrefix]
+    public static bool Prefix(MyCommand command)
+    {
+        if (!MyScriptManager_LoadDataPatch.IsLoading)
+            return true; // Run the original method
+        MyScriptManager_LoadDataPatch.CommandsToAdd.Add(command);
+        return false; // Break early and skip original method to avoid parallelization issues
     }
 }
