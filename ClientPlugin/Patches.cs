@@ -9,12 +9,15 @@ using Sandbox.Graphics.GUI;
 using System.Reflection;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using ClientPlugin;
 using ParallelTasks;
 using Sandbox.Game.Multiplayer;
 using VRage;
 using VRage.Collections;
+using VRage.FileSystem;
 using VRage.Game.Components;
 using VRage.Game.Entity.UseObject;
 using VRage.Game;
@@ -131,5 +134,37 @@ class MyConsole_AddCommandPatch
             return true; // Run the original method
         MyScriptManager_LoadDataPatch.CommandsToAdd.Add(command);
         return false; // Break early and skip original method to avoid parallelization issues
+    }
+}
+
+[HarmonyPatch(typeof(MyScriptManager), nameof(MyScriptManager.UpdateCompatibility))]
+class MyScriptManager_UpdateCompatibiltyPatch
+{
+    private static Dictionary<string, string> CompatibilityChanges => typeof(MyScriptManager)
+        .GetField("m_compatibilityChanges", BindingFlags.NonPublic | BindingFlags.Static)
+        ?.GetValue(null) as Dictionary<string, string>;
+
+    [HarmonyPrefix]
+    public static bool Prefix(string filename, ref string __result)
+    {
+        using (Stream stream = MyFileSystem.OpenRead(filename))
+        {
+            if (stream == null)
+                return false;
+
+            using (StreamReader streamReader = new StreamReader(stream))
+            {
+                StringBuilder text = new StringBuilder(streamReader.ReadToEnd());
+                text = text.Insert(0, MyScriptManager.CompatibilityUsings);
+                
+                foreach (var keyValuePair in CompatibilityChanges)
+                {
+                    text = text.Replace(keyValuePair.Key, keyValuePair.Value);
+                }
+
+                __result = text.ToString();
+                return false;
+            }
+        }
     }
 }
