@@ -22,12 +22,13 @@ using VRage.ObjectBuilders.Private;
 using VRage.ObjectBuilders;
 using VRage.Plugins;
 using VRage.Utils;
+using Sandbox.Game.GUI;
 
 [HarmonyPatch(typeof(MyScriptManager), "LoadData")]
 public class MyScriptManager_LoadDataPatch
 {
     public static bool IsLoading { get; private set; } = false;
-    public static List<MyCommand> CommandsToAdd;
+    public static List<(MyModContext, MyStringId, Assembly)> AssembliesToAdd;
 
     [HarmonyPrefix]
     public static bool Prefix(MyScriptManager __instance)
@@ -35,7 +36,7 @@ public class MyScriptManager_LoadDataPatch
         MySandboxGame.Log.WriteLine("PATCHED MyScriptManager.LoadData() - START");
 		MySandboxGame.Log.IncreaseIndent();
 
-        CommandsToAdd = new List<MyCommand>();
+        AssembliesToAdd = new List<(MyModContext, MyStringId, Assembly)>();
         IsLoading = true;
 
 		MyScriptManager.Static = __instance;
@@ -71,11 +72,14 @@ public class MyScriptManager_LoadDataPatch
 		MyUseObjectFactory.RegisterAssemblyTypes(__instance.Scripts.Values.ToArray<Assembly>());
 
         IsLoading = false;
-        foreach (var command in CommandsToAdd)
+
+        // Sidestep threading problems
+        foreach (var assemblyTuple in AssembliesToAdd)
         {
-            MyConsole.AddCommand(command);
+            __instance.Call("AddAssembly", assemblyTuple.Item1, assemblyTuple.Item2, assemblyTuple.Item3);
+            MySandboxGame.Log.WriteLine("AddAssembly " + assemblyTuple.Item2.String);
         }
-        CommandsToAdd = null;
+        AssembliesToAdd = null;
 
 		MySandboxGame.Log.DecreaseIndent();
 		MySandboxGame.Log.WriteLine("MyScriptManager.LoadData() - END");
@@ -121,15 +125,15 @@ public class MyScriptManager_LoadDataPatch
     }
 }
 
-[HarmonyPatch(typeof(MyConsole), nameof(MyConsole.AddCommand))]
-class MyConsole_AddCommandPatch
+[HarmonyPatch(typeof(MyScriptManager), "AddAssembly")]
+public class MyScriptManager_AddAssemblyPatch
 {
     [HarmonyPrefix]
-    public static bool Prefix(MyCommand command)
+    public static bool Prefix(MyModContext context, MyStringId myStringId, Assembly assembly)
     {
         if (!MyScriptManager_LoadDataPatch.IsLoading)
             return true; // Run the original method
-        MyScriptManager_LoadDataPatch.CommandsToAdd.Add(command);
+        MyScriptManager_LoadDataPatch.AssembliesToAdd.Add((context, myStringId, assembly));
         return false; // Break early and skip original method to avoid parallelization issues
     }
 }
